@@ -6,7 +6,7 @@ Current state:
 
 * Embedding node.js today is not only a desirable goal, it is actively being
 done by a number of projects despite the lack of support.
-* Lack of support starts with lack of documenation.
+* Lack of support starts with lack of documentation.
 * The one stable interface `node::Start()` is a misnomer as it not only starts
 node, but it also executes, and terminates node.  This rarely is what an embedder wants.
 * Embedding node today requires extracting key bits from the source files, and
@@ -32,7 +32,7 @@ with the following changes:
     * First, it is a subset so as to not cause duplicate symbols when linked
       with `libnode.a`.  This part is done for demo purposes only, the intent
       is that this will be abandoned, and the results of the next two steps
-      will be foled into node.js itself.
+      will be folded into node.js itself.
     * Second, `node::Start` has been split into `node:Setup`,
       `node::ExecuteString` and `node::Teardown`.
     * Third, a `C` interface to invoking these functions is provided.
@@ -52,15 +52,15 @@ Discussion starters:
 -------------------
 
 * Should we retire `node::Start` or implement it by calling these new wrappers?
-* Is argc/argv the right interface for an API?  Should the defaults be
+* Is `argc`/`argv` the right interface for an API?  Should the defaults be
   different (example: should no arguments trigger a REPL) when called by an API?
 * Splitting `node::Start` into three steps means that some data is allocated
-  on the heap instead of the stack, and some things (most notabley locks)
+  on the heap instead of the stack, and some things (most noteabley locks)
   are obtained and released multiple times.  My intuition is that this
-  is negligable when compared to the overhead of starting a complete node
+  is negligible when compared to the overhead of starting a complete node
   executable, but that needs to be measured.
 * Currently, `nodeExecuteString` is synchronous is that it waits until the
-  event loop is emptied before returning.  Should an asyncronous version
+  event loop is emptied before returning.  Should an asynchronous version
   be created, and if so, what is the desired semantics?
 
 Future plans:
@@ -69,9 +69,7 @@ Future plans:
 * This demo only shows incrementally updating a single execution context.
 It should be expanded to include creating multiple contexts (either
 concurrently or serially).
-* The iterface should be NAPIized, and make to work on Microsoft Windows.
+* The interface should be NAPIized, and make to work on Microsoft Windows.
 Help from the ChakraCore team would be greatly appreciated.
 * While I suspect that only the `C` interface needs to be officially maintained,
-prodiving examples in Go, Java, Python, TCL, Ruby, and others would be valuable and straightforward.
-
-
+providing examples in Go, Java, Python, TCL, Ruby, and others would be valuable and straightforward.
