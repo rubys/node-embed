@@ -69,6 +69,8 @@ Future plans:
 * This demo only shows incrementally updating a single execution context.
 It should be expanded to include creating multiple contexts (either
 concurrently or serially).
+* The iterface should be NAPIized, and make to work on Microsoft Windows.
+Help from the ChakraCore team would be greatly appreciated.
 * While I suspect that only the `C` interface needs to be officially maintained,
 prodiving examples in Go, Java, Python, TCL, Ruby, and others would be valuable and straightforward.
 
