@@ -270,7 +270,7 @@ static MaybeLocal<Value> ExecuteString(Environment* env,
 // Code below this line is generally new and/or rearranged.
 /////////////////////////////////////////////////////////////////////////
 
-inline node_context_struct *Setup(Isolate* isolate, IsolateData* isolate_data,
+inline node_context *Setup(Isolate* isolate, IsolateData* isolate_data,
                  const std::vector<std::string>& args,
                  const std::vector<std::string>& exec_args) {
   HandleScope handle_scope(isolate);
@@ -288,7 +288,7 @@ inline node_context_struct *Setup(Isolate* isolate, IsolateData* isolate_data,
     return NULL;  // Signal internal error.
   }
 
-  auto context_struct = new node_context_struct({isolate, env, NULL, NULL});
+  auto context_struct = new node_context({isolate, env, NULL, NULL});
 
   {
     Environment::AsyncCallbackScope callback_scope(env);
@@ -318,7 +318,7 @@ int Teardown(Environment *env) {
 }
 
 
-inline node_context_struct *Setup(uv_loop_t* event_loop,
+inline node_context *Setup(uv_loop_t* event_loop,
                  const std::vector<std::string>& args,
                  const std::vector<std::string>& exec_args) {
   ArrayBufferAllocator *allocator = CreateArrayBufferAllocator();
@@ -333,7 +333,7 @@ inline node_context_struct *Setup(uv_loop_t* event_loop,
   }
 
   IsolateData *isolate_data;
-  node_context_struct *context_struct;
+  node_context *context_struct;
 
   {
     Locker locker(isolate);
@@ -356,7 +356,7 @@ inline node_context_struct *Setup(uv_loop_t* event_loop,
   return context_struct;
 }
 
-inline int Teardown(node_context_struct *context_struct) {
+inline int Teardown(node_context *context_struct) {
   int exit_code;
   Isolate *isolate = context_struct->isolate;
 
@@ -478,7 +478,7 @@ node_context *nodeSetup(int argc, char** argv) {
   return context;
 }
 
-void nodeExecuteString(node_context_struct *node_context,
+void nodeExecuteString(node_context *node_context,
                           const char *source,
                           const char *filename) {
   v8::Isolate *isolate = node_context->isolate;
@@ -523,7 +523,7 @@ void nodeExecuteString(node_context_struct *node_context,
   }
 }
 
-extern int nodeTeardown(node_context_struct *context_struct) {
+extern int nodeTeardown(node_context *context_struct) {
   int exit_code = node::Teardown(context_struct);
   node::Dispose();
   return exit_code;
