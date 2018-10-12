@@ -1,14 +1,14 @@
 #include "node_embed.h"
 
 int main(int argc, char** argv) {
-  struct node_context_struct *context_struct = nodeSetup(argc, argv);
+  node_context *context = nodeSetup(argc, argv);
 
-  if (context_struct) {
-    nodeExecuteString(context_struct, "let foo = 1", "__init__");
-    nodeExecuteString(context_struct, "foo = 2", "__init__");
-    nodeExecuteString(context_struct, "console.log(foo)", "__init__");
+  if (context) {
+    nodeExecuteString(context, "let foo = 1", "__init__");
+    nodeExecuteString(context, "foo = 2", "__init__");
+    nodeExecuteString(context, "console.log(foo)", "__init__");
 
-    return nodeTeardown(context_struct);
+    return nodeTeardown(context);
   } else {
     return 12;
   }
