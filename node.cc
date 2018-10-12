@@ -45,36 +45,31 @@ struct node_context_struct {
 
 namespace node {
 
-using v8::ArrayBuffer;
 using v8::Context;
 using v8::EscapableHandleScope;
 using v8::HandleScope;
 using v8::Isolate;
 using v8::Local;
-using v8::MaybeLocal;
 using v8::Locker;
+using v8::MaybeLocal;
+using v8::Script;
 using v8::ScriptOrigin;
 using v8::SealHandleScope;
 using v8::String;
+using v8::TracingController;
 using v8::TryCatch;
 using v8::V8;
 using v8::Value;
 
 static bool v8_is_profiling = false;
 
-// TODO(addaleax): This should not be global.
-static bool abort_on_uncaught_exception = false;
-
-// Bit flag used to track security reverts (see node_revert.h)
-extern bool v8_initialized;
-
 static Mutex node_isolate_mutex;
-static v8::Isolate* node_isolate;
+static Isolate* node_isolate;
 
 // Ensures that __metadata trace events are only emitted
 // when tracing is enabled.
 class NodeTraceStateObserver :
-    public v8::TracingController::TraceStateObserver {
+    public TracingController::TraceStateObserver {
  public:
   void OnTraceEnabled() override {
     char name_buffer[512];
@@ -157,15 +152,15 @@ class NodeTraceStateObserver :
     UNREACHABLE();
   }
 
-  explicit NodeTraceStateObserver(v8::TracingController* controller) :
+  explicit NodeTraceStateObserver(TracingController* controller) :
       controller_(controller) {}
   ~NodeTraceStateObserver() override {}
 
  private:
-  v8::TracingController* controller_;
+  TracingController* controller_;
 };
 
-struct {
+static struct {
 #if NODE_USE_V8_PLATFORM
   void Initialize(int thread_pool_size) {
     tracing_agent_.reset(new tracing::Agent());
@@ -173,15 +168,18 @@ struct {
     controller->AddTraceStateObserver(new NodeTraceStateObserver(controller));
     tracing::TraceEventHelper::SetTracingController(controller);
     StartTracingAgent();
+    // Tracing must be initialized before platform threads are created.
     platform_ = new NodePlatform(thread_pool_size, controller);
     V8::InitializePlatform(platform_);
   }
 
   void Dispose() {
-    tracing_agent_.reset(nullptr);
     platform_->Shutdown();
     delete platform_;
     platform_ = nullptr;
+    // Destroy tracing after the platform (and platform threads) have been
+    // stopped.
+    tracing_agent_.reset(nullptr);
   }
 
   void DrainVMTasks(Isolate* isolate) {
@@ -199,7 +197,7 @@ struct {
     // right away on the websocket port and fails to bind/etc, this will return
     // false.
     return env->inspector_agent()->Start(
-        script_path == nullptr ? "" : script_path, options);
+        script_path == nullptr ? "" : script_path, options, true);
   }
 
   bool InspectorStarted(Environment* env) {
@@ -265,11 +263,25 @@ struct {
 #endif  //  !NODE_USE_V8_PLATFORM || !HAVE_INSPECTOR
 } v8_platform;
 
+
 #ifdef __POSIX__
 static const unsigned kMaxSignal = 32;
 #endif
 
-// Legacy MakeCallback()s
+
+void RunBeforeExit(Environment* env);
+
+static void StartInspector(Environment* env, const char* path,
+                           std::shared_ptr<DebugOptions> debug_options) {
+#if HAVE_INSPECTOR
+  CHECK(!env->inspector_agent()->IsListening());
+  v8_platform.StartInspector(env, path, debug_options);
+#endif  // HAVE_INSPECTOR
+}
+
+static void ReportException(Environment* env, const TryCatch& try_catch) {
+  ReportException(env, try_catch.Exception(), try_catch.Message());
+}
 
 static void WaitForInspectorDisconnect(Environment* env) {
 #if HAVE_INSPECTOR
@@ -292,127 +304,6 @@ static void WaitForInspectorDisconnect(Environment* env) {
 }
 
 
-inline struct node_module* FindModule(struct node_module* list,
-                                      const char* name,
-                                      int flag) {
-  struct node_module* mp;
-
-  for (mp = list; mp != nullptr; mp = mp->nm_link) {
-    if (strcmp(mp->nm_modname, name) == 0)
-      break;
-  }
-
-  CHECK(mp == nullptr || (mp->nm_flags & flag) != 0);
-  return mp;
-}
-
-node_module* get_builtin_module(const char* name);
-node_module* get_internal_module(const char* name);
-node_module* get_linked_module(const char* name);
-
-class DLib {
- public:
-#ifdef __POSIX__
-  static const int kDefaultFlags = RTLD_LAZY;
-#else
-  static const int kDefaultFlags = 0;
-#endif
-
-  inline DLib(const char* filename, int flags)
-      : filename_(filename), flags_(flags), handle_(nullptr) {}
-
-  inline bool Open();
-  inline void Close();
-  inline void* GetSymbolAddress(const char* name);
-
-  const std::string filename_;
-  const int flags_;
-  std::string errmsg_;
-  void* handle_;
-#ifndef __POSIX__
-  uv_lib_t lib_;
-#endif
- private:
-  DISALLOW_COPY_AND_ASSIGN(DLib);
-};
-
-
-#ifdef __POSIX__
-bool DLib::Open() {
-  handle_ = dlopen(filename_.c_str(), flags_);
-  if (handle_ != nullptr)
-    return true;
-  errmsg_ = dlerror();
-  return false;
-}
-
-void DLib::Close() {
-  if (handle_ == nullptr) return;
-  dlclose(handle_);
-  handle_ = nullptr;
-}
-
-void* DLib::GetSymbolAddress(const char* name) {
-  return dlsym(handle_, name);
-}
-#else  // !__POSIX__
-bool DLib::Open() {
-  int ret = uv_dlopen(filename_.c_str(), &lib_);
-  if (ret == 0) {
-    handle_ = static_cast<void*>(lib_.handle);
-    return true;
-  }
-  errmsg_ = uv_dlerror(&lib_);
-  uv_dlclose(&lib_);
-  return false;
-}
-
-void DLib::Close() {
-  if (handle_ == nullptr) return;
-  uv_dlclose(&lib_);
-  handle_ = nullptr;
-}
-
-void* DLib::GetSymbolAddress(const char* name) {
-  void* address;
-  if (0 == uv_dlsym(&lib_, name, &address)) return address;
-  return nullptr;
-}
-#endif  // !__POSIX__
-
-static void StartInspector(Environment* env, const char* path,
-                           std::shared_ptr<DebugOptions> debug_options) {
-#if HAVE_INSPECTOR
-  CHECK(!env->inspector_agent()->IsListening());
-  v8_platform.StartInspector(env, path, debug_options);
-#endif  // HAVE_INSPECTOR
-}
-
-
-extern void PlatformInit();
-
-void ProcessArgv(std::vector<std::string>* args,
-                 std::vector<std::string>* exec_args,
-                 bool is_env);
-
-
-void Init(std::vector<std::string>* argv,
-          std::vector<std::string>* exec_argv);
-
-void RunBeforeExit(Environment* env);
-
-Environment* CreateEnvironment(IsolateData* isolate_data,
-                               Local<Context> context,
-                               int argc,
-                               const char* const* argv,
-                               int exec_argc,
-                               const char* const* exec_argv);
-
-static void ReportException(Environment* env, const TryCatch& try_catch) {
-  ReportException(env, try_catch.Exception(), try_catch.Message());
-}
-
-
 // Executes a str within the current v8 context.
 static MaybeLocal<Value> ExecuteString(Environment* env,
                                        Local<String> source,
@@ -425,8 +316,8 @@ static MaybeLocal<Value> ExecuteString(Environment* env,
   try_catch.SetVerbose(false);
 
   ScriptOrigin origin(filename);
-  MaybeLocal<v8::Script> script =
-      v8::Script::Compile(env->context(), source, &origin);
+  MaybeLocal<Script> script =
+      Script::Compile(env->context(), source, &origin);
   if (script.IsEmpty()) {
     ReportException(env, try_catch);
     env->Exit(3);
@@ -458,20 +349,15 @@ inline node_context_struct *Setup(Isolate* isolate, IsolateData* isolate_data,
     new Environment(isolate_data, context, v8_platform.GetTracingAgentWriter());
   env->Start(args, exec_args, v8_is_profiling);
 
+  const char* path = args.size() > 1 ? args[1].c_str() : nullptr;
+  StartInspector(env, path, env->options()->debug_options);
+
   if (env->options()->debug_options->inspector_enabled &&
       !v8_platform.InspectorStarted(env)) {
     return NULL;  // Signal internal error.
   }
 
   auto context_struct = new node_context_struct({isolate, env, NULL, NULL});
-
-  env->set_abort_on_uncaught_exception(abort_on_uncaught_exception);
-
-  // TODO(addaleax): Maybe access this option directly instead of setting
-  // a boolean member of Environment. Ditto below for trace_sync_io.
-  if (env->options()->no_force_async_hooks_checks) {
-    env->async_hooks()->no_force_checks();
-  }
 
   {
     Environment::AsyncCallbackScope callback_scope(env);
@@ -480,10 +366,6 @@ inline node_context_struct *Setup(Isolate* isolate, IsolateData* isolate_data,
     env->async_hooks()->pop_async_id(1);
   }
 
-  env->set_trace_sync_io(env->options()->trace_sync_io);
-
-  const char* path = args.size() > 1 ? args[1].c_str() : nullptr;
-  StartInspector(env, path, env->options()->debug_options);
   return context_struct;
 }
 
@@ -504,13 +386,12 @@ int Teardown(Environment *env) {
   return exit_code;
 }
 
+
 inline node_context_struct *Setup(uv_loop_t* event_loop,
                  const std::vector<std::string>& args,
                  const std::vector<std::string>& exec_args) {
-  node_context_struct *context_struct;
-  auto allocator0 = CreateArrayBufferAllocator();
-  auto allocator = CreateArrayBufferAllocator();
-  Isolate* const isolate = NewIsolate(allocator);
+  ArrayBufferAllocator *allocator = CreateArrayBufferAllocator();
+  Isolate* const isolate = NewIsolate(allocator, event_loop);
   if (isolate == nullptr)
     return NULL;  // Signal internal error.
 
@@ -521,6 +402,7 @@ inline node_context_struct *Setup(uv_loop_t* event_loop,
   }
 
   IsolateData *isolate_data;
+  node_context_struct *context_struct;
 
   {
     Locker locker(isolate);
@@ -536,9 +418,8 @@ inline node_context_struct *Setup(uv_loop_t* event_loop,
     if (isolate_data->options()->track_heap_objects) {
       isolate->GetHeapProfiler()->StartTrackingHeapObjects(true);
     }
-    context_struct =
-        Setup(isolate, isolate_data, args, exec_args);
-    context_struct->allocator  = allocator0;
+    context_struct = Setup(isolate, isolate_data, args, exec_args);
+    context_struct->allocator = allocator;
     context_struct->isolate_data = isolate_data;
   }
   return context_struct;
@@ -547,6 +428,7 @@ inline node_context_struct *Setup(uv_loop_t* event_loop,
 inline int Teardown(node_context_struct *context_struct) {
   int exit_code;
   Isolate *isolate = context_struct->isolate;
+
   {
     Locker locker(context_struct->isolate);
     exit_code = Teardown(context_struct->env);
@@ -554,7 +436,7 @@ inline int Teardown(node_context_struct *context_struct) {
     v8_platform.DrainVMTasks(isolate);
     v8_platform.CancelVMTasks(isolate);
 #if defined(LEAK_SANITIZER)
-     __lsan_do_leak_check();
+    __lsan_do_leak_check();
 #endif
   }
 
@@ -565,6 +447,7 @@ inline int Teardown(node_context_struct *context_struct) {
   }
 
   isolate->Dispose();
+  v8_platform.Platform()->UnregisterIsolate(isolate);
   FreeIsolateData(context_struct->isolate_data);
   FreeArrayBufferAllocator(context_struct->allocator);
   delete context_struct;
@@ -572,34 +455,10 @@ inline int Teardown(node_context_struct *context_struct) {
   return exit_code;
 }
 
-void Create() {
-  atexit([] () { uv_tty_reset_mode(); });
-  PlatformInit();
-  performance::performance_node_start = PERFORMANCE_NOW();
+extern void PlatformInit();
 
-  // Hack around with the argv pointer. Used for process.title = "blah".
-#if HAVE_OPENSSL
-  {
-    std::string extra_ca_certs;
-    if (SafeGetenv("NODE_EXTRA_CA_CERTS", &extra_ca_certs))
-      crypto::UseExtraCaCerts(extra_ca_certs);
-  }
-#ifdef NODE_FIPS_MODE
-  // In the case of FIPS builds we should make sure
-  // the random source is properly initialized first.
-  OPENSSL_init();
-#endif  // NODE_FIPS_MODE
-  // V8 on Windows doesn't have a good source of entropy. Seed it from
-  // OpenSSL's pool.
-  V8::SetEntropySource(crypto::EntropySource);
-#endif  // HAVE_OPENSSL
-
-  v8_platform.Initialize(
-      per_process_opts->v8_thread_pool_size);
-  V8::Initialize();
-  performance::performance_v8_start = PERFORMANCE_NOW();
-  v8_initialized = true;
-}
+void Init(std::vector<std::string>* argv,
+          std::vector<std::string>* exec_argv);
 
 void Dispose() {
   v8_platform.StopTracingAgent();
@@ -617,12 +476,25 @@ void Dispose() {
 
 }  // namespace node
 
+#if !HAVE_INSPECTOR
+void Initialize() {}
+
+NODE_BUILTIN_MODULE_CONTEXT_AWARE(inspector, Initialize)
+#endif  // !HAVE_INSPECTOR
+
+
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 node_context *nodeSetup(int argc, char** argv) {
+  atexit([] () { uv_tty_reset_mode(); });
+  node::PlatformInit();
+  node::performance::performance_node_start = PERFORMANCE_NOW();
+
   CHECK_GT(argc, 0);
+
+  // Hack around with the argv pointer. Used for process.title = "blah".
   argv = uv_setup_args(argc, argv);
 
   std::vector<std::string> args(argv, argv + argc);
@@ -632,8 +504,8 @@ node_context *nodeSetup(int argc, char** argv) {
   // interactive
   bool default_interactive = true;
   for (auto const& arg: args) {
-    if (!arg.compare("-") && !arg.compare("-i") && 
-        !arg.compare("--interactive") && !arg.compare("-e") && 
+    if (!arg.compare("-") && !arg.compare("-i") &&
+        !arg.compare("--interactive") && !arg.compare("-e") &&
         !arg.compare("--eval"))
       default_interactive = false;
   }
@@ -645,7 +517,29 @@ node_context *nodeSetup(int argc, char** argv) {
   // This needs to run *before* V8::Initialize().
   node::Init(&args, &exec_args);
 
-  node::Create();
+#if HAVE_OPENSSL
+  {
+    std::string extra_ca_certs;
+    if (node::SafeGetenv("NODE_EXTRA_CA_CERTS", &extra_ca_certs))
+      node::crypto::UseExtraCaCerts(extra_ca_certs);
+  }
+#ifdef NODE_FIPS_MODE
+  // In the case of FIPS builds we should make sure
+  // the random source is properly initialized first.
+  OPENSSL_init();
+#endif  // NODE_FIPS_MODE
+  // V8 on Windows doesn't have a good source of entropy. Seed it from
+  // OpenSSL's pool.
+  v8::V8::SetEntropySource(node::crypto::EntropySource);
+#endif  // HAVE_OPENSSL
+
+  // FIXME(rubys) - need to update static struct too
+  node::v8_platform.platform_ = (node::NodePlatform *)
+  node::InitializeV8Platform(node::per_process_opts->v8_thread_pool_size);
+  v8::V8::Initialize();
+  node::performance::performance_v8_start = PERFORMANCE_NOW();
+  node::v8_initialized = true;
+
   node_context* context = node::Setup(uv_default_loop(), args, exec_args);
 
   if (!context) node::Dispose();
@@ -656,7 +550,6 @@ node_context *nodeSetup(int argc, char** argv) {
 void nodeExecuteString(node_context_struct *node_context,
                           const char *source,
                           const char *filename) {
-
   v8::Isolate *isolate = node_context->isolate;
   node::Environment *env = node_context->env;
   v8::Locker locker(isolate);
