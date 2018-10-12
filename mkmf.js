@@ -34,7 +34,7 @@ node.o: node.cc node_embed.h
 node_main.o: node_main.c node_embed.h
 \tcc $(CFLAGS_Release) -c $< -o $@
 
-test:
+test: node_main
 \ttest \`./node_main\` = "2" && echo success
 
 clean:
