@@ -15,8 +15,8 @@ knowledge of the build system, platforms, and dependencies (v8, openssl, etc).
 Quick start:
 -----------
 
-* To start with, one needs to clone and build node from github.  This code
-has been tested on Mac OS/X, but is likely to work on Linux and other
+* To start with, one needs to clone and build node from GitHub.  This code
+has been tested on Mac OS/X and Ubuntu, and is likely to work on other 
 Unix like operating systems.
 * The next step is to run the provided `mkmf.js` and specify the directory
 for the built node tree.  This builds a standalone Makefile for your platform.
