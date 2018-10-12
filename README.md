@@ -26,8 +26,8 @@ for the built node tree.  This builds a standalone Makefile for your platform.
 How it works:
 ------------
 
-* The `mkmf.js` is pretty self explanatory.
-* `node.cc` is an updated version of `src/node.cc` from the node repository
+* The [`mkmf.js`](./mkmf.js) is pretty self explanatory.
+* [`node.cc`](./node.cc) is an updated version of `src/node.cc` from the node repository
 with the following changes:
     * First, it is a subset so as to not cause duplicate symbols when linked
       with `libnode.a`.  This part is done for demo purposes only, the intent
@@ -36,8 +36,8 @@ with the following changes:
     * Second, `node::Start` has been split into `node:Setup`,
       `node::ExecuteString` and `node::Teardown`.
     * Third, a `C` interface to invoking these functions is provided.
-* `node_embed.h` contains the C API
-* `node_main.c` is a demo program that calls `nodeSetup`, successively calls
+* [`node_embed.h`](./node_embed.h) contains the C API
+* [`node_main.c`](./node_main.c) is a demo program that calls `nodeSetup`, successively calls
   `nodeExecuteString` and then finally `nodeTeardown`.
 
 Why was this demo created?
