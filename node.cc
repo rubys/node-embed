@@ -19,6 +19,10 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
+/////////////////////////////////////////////////////////////////////////
+#include "node_embed.h"
+/////////////////////////////////////////////////////////////////////////
+
 #include "tracing/traced_value.h"
 
 #if HAVE_OPENSSL
@@ -34,16 +38,6 @@
 #include <dlfcn.h>
 #endif
 
-/////////////////////////////////////////////////////////////////////////
-#include "node_embed.h"
-
-struct node_context_struct {
-  v8::Isolate *isolate;
-  node::Environment *env;
-  node::IsolateData *isolate_data;
-  node::ArrayBufferAllocator *allocator;
-};
-/////////////////////////////////////////////////////////////////////////
 
 namespace node {
 
