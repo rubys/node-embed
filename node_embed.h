@@ -38,9 +38,7 @@ int nodeTeardown(node_context *context);
 #include "node.h"
 
 struct node_context_struct {
-  v8::Isolate *isolate;
   node::Environment *env;
-  node::IsolateData *isolate_data;
   node::ArrayBufferAllocator *allocator;
 };
 #endif

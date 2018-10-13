@@ -282,7 +282,7 @@ inline node_context *Setup(Isolate* isolate, IsolateData* isolate_data,
     return NULL;  // Signal internal error.
   }
 
-  auto context_struct = new node_context({isolate, env, NULL, NULL});
+  auto context_struct = new node_context({env, NULL});
 
   {
     Environment::AsyncCallbackScope callback_scope(env);
@@ -345,17 +345,16 @@ inline node_context *Setup(uv_loop_t* event_loop,
     }
     context_struct = Setup(isolate, isolate_data, args, exec_args);
     context_struct->allocator = allocator;
-    context_struct->isolate_data = isolate_data;
   }
   return context_struct;
 }
 
 inline int Teardown(node_context *context_struct) {
   int exit_code;
-  Isolate *isolate = context_struct->isolate;
+  Isolate *isolate = context_struct->env->isolate();
 
   {
-    Locker locker(context_struct->isolate);
+    Locker locker(isolate);
     exit_code = Teardown(context_struct->env);
 
     v8_platform.DrainVMTasks(isolate);
@@ -373,7 +372,7 @@ inline int Teardown(node_context *context_struct) {
 
   isolate->Dispose();
   v8_platform.Platform()->UnregisterIsolate(isolate);
-  FreeIsolateData(context_struct->isolate_data);
+  FreeIsolateData(context_struct->env->isolate_data());
   FreeArrayBufferAllocator(context_struct->allocator);
   delete context_struct;
 
@@ -475,8 +474,8 @@ node_context *nodeSetup(int argc, char** argv) {
 void nodeExecuteString(node_context *node_context,
                           const char *source,
                           const char *filename) {
-  v8::Isolate *isolate = node_context->isolate;
   node::Environment *env = node_context->env;
+  v8::Isolate *isolate = env->isolate();
   v8::Locker locker(isolate);
 
   v8::HandleScope handle_scope(isolate);
