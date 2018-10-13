@@ -38,6 +38,14 @@
 #include <dlfcn.h>
 #endif
 
+#define READONLY_PROPERTY(obj, str, var)                                      \
+  do {                                                                        \
+    obj->DefineOwnProperty(env->context(),                                    \
+                           OneByteString(env->isolate(), str),                \
+                           var,                                               \
+                           ReadOnly).FromJust();                              \
+  } while (0)
+
 
 namespace node {
 
@@ -48,6 +56,8 @@ using v8::Isolate;
 using v8::Local;
 using v8::Locker;
 using v8::MaybeLocal;
+using v8::Object;
+using v8::ReadOnly;
 using v8::Script;
 using v8::ScriptOrigin;
 using v8::SealHandleScope;
@@ -274,6 +284,9 @@ inline node_context *Setup(Isolate* isolate, IsolateData* isolate_data,
     new Environment(isolate_data, context, v8_platform.GetTracingAgentWriter());
   env->Start(args, exec_args, v8_is_profiling);
 
+  Local<Object> process = env->process_object();
+  READONLY_PROPERTY(process, "_embed", True(env->isolate()));
+
   const char* path = args.size() > 1 ? args[1].c_str() : nullptr;
   StartInspector(env, path, env->options()->debug_options);
 
@@ -423,7 +436,7 @@ node_context *nodeSetup(int argc, char** argv) {
 
   std::vector<std::string> args(argv, argv + argc);
   std::vector<std::string> exec_args;
-
+ 
   // add "-e ''" to args if no execute is provided and not explicitly
   // interactive
   bool default_interactive = true;
